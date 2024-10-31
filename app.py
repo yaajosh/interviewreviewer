@@ -68,7 +68,7 @@ def login():
                     if check_credentials(username, password):
                         st.session_state.authenticated = True
                         st.session_state.current_user = username
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error("Falsche Anmeldedaten!")
         
@@ -99,7 +99,7 @@ def login():
             st.session_state.authenticated = False
             st.session_state.current_user = None
             st.session_state.current_project = None
-            st.experimental_rerun()
+            st.rerun()
 
 def main():
     st.title("User Interview Analyse Tool")
