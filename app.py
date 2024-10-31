@@ -117,15 +117,25 @@ def main():
 
     if uploaded_file is not None:
         if st.button("Analysieren"):
-            with st.spinner("Video wird transkribiert..."):
+            # Lustige Ladeanimationen
+            with st.status("🤖 KI-Assistent bei der Arbeit...", expanded=True) as status:
+                st.write("🎥 Schaue mir das Video an...")
                 transcript = transcribe_video(uploaded_file)
-                st.subheader("Transkription:")
+                
+                st.write("🧠 Denke nach...")
+                summary = summarize_with_gpt(transcript)
+                
+                status.update(label="✨ Fertig!", state="complete", expanded=False)
+
+            # Ergebnisse anzeigen
+            with st.expander("🎯 Transkription", expanded=True):
                 st.text_area("", transcript, height=200)
 
-            with st.spinner("Analyse wird durchgeführt..."):
-                summary = summarize_with_gpt(transcript)
-                st.subheader("Zusammenfassung der wichtigsten Punkte:")
+            with st.expander("📊 Analyse", expanded=True):
                 st.markdown(summary)
+
+            # Erfolgsanimation
+            st.balloons()
 
 if __name__ == "__main__":
     main() 
