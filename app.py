@@ -127,25 +127,45 @@ def main():
 
     if uploaded_file is not None:
         if st.button("Analysieren"):
-            # Lustige Ladeanimationen
-            with st.status("🤖 KI-Assistent bei der Arbeit...", expanded=True) as status:
-                st.write("🎥 Schaue mir das Video an...")
+            # Fortschrittsbalken
+            progress_bar = st.progress(0, "Starte Analyse...")
+            
+            # Status-Container für detaillierte Updates
+            with st.status("🎬 Verarbeite Interview...", expanded=True) as status:
+                # Phase 1: Video-Konvertierung
+                st.write("🎥 Konvertiere Video...")
+                progress_bar.progress(20)
+                
+                # Phase 2: Transkription
+                st.write("🎙️ Erstelle Transkription...")
                 transcript = transcribe_video(uploaded_file)
+                progress_bar.progress(60)
                 
-                st.write("🧠 Denke nach...")
-                summary = summarize_with_gpt(transcript)
-                
-                status.update(label="✨ Fertig!", state="complete", expanded=False)
+                if transcript:
+                    # Phase 3: GPT Analyse
+                    st.write("🧠 Analysiere Inhalt mit GPT-4...")
+                    summary = summarize_with_gpt(transcript)
+                    progress_bar.progress(90)
+                    
+                    # Phase 4: Fertigstellung
+                    st.write("✨ Formatiere Ergebnisse...")
+                    progress_bar.progress(100)
+                    status.update(label="✅ Analyse abgeschlossen!", state="complete", expanded=False)
 
-            # Ergebnisse anzeigen
-            with st.expander("🎯 Transkription", expanded=True):
-                st.text_area("", transcript, height=200)
+                    # Ergebnisse anzeigen
+                    st.success("Analyse erfolgreich abgeschlossen!")
+                    
+                    with st.expander("📝 Transkription", expanded=True):
+                        st.text_area("", transcript, height=200)
 
-            with st.expander("📊 Analyse", expanded=True):
-                st.markdown(summary)
+                    with st.expander("📊 Analyse", expanded=True):
+                        st.markdown(summary)
 
-            # Erfolgsanimation
-            st.balloons()
+                    # Erfolgsanimation
+                    st.balloons()
+                else:
+                    status.update(label="❌ Fehler bei der Verarbeitung", state="error")
+                    progress_bar.empty()
 
 if __name__ == "__main__":
     main() 
