@@ -95,6 +95,51 @@ def login():
     else:
         st.sidebar.success(f"✅ Eingeloggt als {st.session_state.current_user}")
         
+        # Projekt Management
+        st.sidebar.markdown("---")
+        st.sidebar.title("📊 Projekt Manager")
+        
+        # Neues Projekt erstellen
+        with st.sidebar.expander("➕ Neues Projekt"):
+            with st.form("new_project_form"):
+                new_project = st.text_input("Projektname")
+                project_description = st.text_area("Projektbeschreibung", height=100)
+                create_project = st.form_submit_button("Projekt erstellen")
+                
+                if create_project and new_project:
+                    project_key = f"{st.session_state.current_user}_{new_project}"
+                    if project_key not in st.session_state.projects:
+                        st.session_state.projects[project_key] = {
+                            'name': new_project,
+                            'description': project_description,
+                            'owner': st.session_state.current_user,
+                            'created': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            'analyses': {}
+                        }
+                        st.success(f"Projekt '{new_project}' erstellt!")
+                        st.rerun()
+                    else:
+                        st.error("Ein Projekt mit diesem Namen existiert bereits!")
+        
+        # Projekt auswählen
+        if st.session_state.projects:
+            user_projects = {k: v for k, v in st.session_state.projects.items() 
+                           if v['owner'] == st.session_state.current_user}
+            
+            if user_projects:
+                project_names = [v['name'] for v in user_projects.values()]
+                selected_project = st.sidebar.selectbox(
+                    "🎯 Projekt auswählen",
+                    project_names
+                )
+                
+                if selected_project:
+                    project_key = f"{st.session_state.current_user}_{selected_project}"
+                    if project_key != st.session_state.current_project:
+                        st.session_state.current_project = project_key
+                        st.rerun()
+        
+        # Ausloggen
         if st.sidebar.button("Ausloggen"):
             st.session_state.authenticated = False
             st.session_state.current_user = None
@@ -115,90 +160,16 @@ def main():
         st.warning("Bitte wählen Sie ein Projekt aus oder erstellen Sie ein neues.")
         return
     
-    if 'processed_files' not in st.session_state:
-        st.session_state.processed_files = set()
-    if 'transcripts' not in st.session_state:
-        st.session_state.transcripts = {}
+    # Zeige aktives Projekt
+    project = st.session_state.projects[st.session_state.current_project]
+    st.write(f"🎯 Aktives Projekt: **{project['name']}**")
     
-    uploaded_file = st.file_uploader("Video hochladen (max 100MB)", type=['mp4', 'mov', 'avi'])
-    
-    if uploaded_file is not None:
-        file_hash = hash(uploaded_file.getvalue())
-        
-        if file_hash in st.session_state.processed_files:
-            st.info("Diese Datei wurde bereits transkribiert. Starte direkt die Analyse...")
-            
-            # Hole gespeicherte Transkription
-            transcript = st.session_state.transcripts.get(file_hash)
-            
-            if st.button("Neu analysieren"):
-                status_container = st.empty()
-                result_container = st.empty()
-                
-                # GPT Analyse
-                with status_container:
-                    st.info("🧠 Analysiere mit GPT-4...")
-                
-                analysis = summarize_with_gpt(transcript)
-                
-                # Zeige Ergebnisse
-                status_container.empty()
-                
-                with result_container.container():
-                    st.success("✅ Analyse abgeschlossen!")
-                    
-                    # Transkription
-                    with st.expander("📝 Transkription", expanded=False):
-                        st.text_area("", transcript, height=200)
-                    
-                    # GPT Analyse
-                    with st.expander("🔍 Analyse", expanded=True):
-                        st.markdown(analysis)
-                    
-                    # Erfolgsanimation
-                    st.balloons()
-        else:
-            if st.button("Analysieren"):
-                status_container = st.empty()
-                progress_container = st.empty()
-                result_container = st.empty()
-                
-                with status_container:
-                    st.info("🎬 Verarbeite Interview...")
-                
-                # Transkription
-                transcript = transcribe_video(uploaded_file)
-                
-                if transcript:
-                    # Speichere Transkription
-                    st.session_state.processed_files.add(file_hash)
-                    st.session_state.transcripts[file_hash] = transcript
-                    
-                    # GPT Analyse
-                    with status_container:
-                        st.info("🧠 Analysiere mit GPT-4...")
-                    
-                    analysis = summarize_with_gpt(transcript)
-                    
-                    # Zeige Ergebnisse
-                    status_container.empty()
-                    progress_container.empty()
-                    
-                    with result_container.container():
-                        st.success("✅ Analyse abgeschlossen!")
-                        
-                        # Transkription
-                        with st.expander("📝 Transkription", expanded=False):
-                            st.text_area("", transcript, height=200)
-                        
-                        # GPT Analyse
-                        with st.expander("🔍 Analyse", expanded=True):
-                            st.markdown(analysis)
-                        
-                        # Erfolgsanimation
-                        st.balloons()
-                else:
-                    status_container.error("❌ Fehler bei der Verarbeitung")
+    # Projekt Details
+    with st.expander("📋 Projekt Details", expanded=False):
+        st.write(f"**Beschreibung:** {project['description']}")
+        st.write(f"**Erstellt am:** {project['created']}")
+        st.write(f"**Besitzer:** {project['owner']}")
+        st.write(f"**Analysen:** {len(project['analyses'])}")
 
 if __name__ == "__main__":
     main() 
