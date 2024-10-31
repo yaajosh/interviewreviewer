@@ -25,37 +25,47 @@ def transcribe_video(uploaded_file):
             tmp.write(uploaded_file.getvalue())
             tmp_path = tmp.name
 
-        # Prüfe, ob ffmpeg verfügbar ist
-        try:
-            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
-        except subprocess.CalledProcessError:
-            st.error("FFmpeg ist nicht korrekt installiert.")
-            return None
-
-        # Konvertiere Video zu Audio
+        # Konvertiere Video zu Audio mit verbesserten Parametern
         audio_path = tmp_path + '.wav'
         try:
-            subprocess.run([
-                'ffmpeg', '-i', tmp_path,
-                '-vn', 
-                '-acodec', 'pcm_s16le',
-                '-ar', '16000',
-                '-ac', '1',
+            command = [
+                'ffmpeg',
+                '-i', tmp_path,
+                '-vn',  # Keine Video-Ausgabe
+                '-acodec', 'pcm_s16le',  # Audio-Codec
+                '-ar', '16000',  # Sample rate
+                '-ac', '1',  # Mono
+                '-y',  # Überschreibe Ausgabedatei
                 audio_path
-            ], capture_output=True, check=True)
-        except subprocess.CalledProcessError as e:
-            st.error(f"Fehler bei der Audio-Konvertierung: {e.stderr.decode()}")
-            return None
+            ]
+            
+            # Führe Konvertierung aus und fange Fehler ab
+            process = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            # Prüfe, ob die Audiodatei erstellt wurde und nicht leer ist
+            if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+                st.error("Die Audiokonvertierung hat eine leere Datei erzeugt.")
+                return None
 
-        # Transkribiere Audio
-        with st.spinner('Transkribiere Audio...'):
+            # Transkribiere Audio
             result = model.transcribe(audio_path)
+            
+            return result["text"]
 
-        # Cleanup
-        os.unlink(tmp_path)
-        os.unlink(audio_path)
-
-        return result["text"]
+        except subprocess.CalledProcessError as e:
+            st.error(f"Fehler bei der Audio-Konvertierung: {e.stderr}")
+            return None
+        finally:
+            # Cleanup
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            if os.path.exists(audio_path):
+                os.unlink(audio_path)
 
     except Exception as e:
         st.error(f"Fehler bei der Verarbeitung: {str(e)}")
