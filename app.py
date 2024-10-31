@@ -21,11 +21,40 @@ def hash_password(password):
     """Einfache Passwort-Hashfunktion"""
     return hashlib.sha256(password.encode()).hexdigest()
 
+def create_user(username, password, email):
+    """Erstellt einen neuen Benutzer"""
+    # Lade aktuelle Benutzer aus secrets.toml
+    users = dict(st.secrets.get("USERS", {}))
+    
+    if username in users:
+        return False, "Benutzername bereits vergeben"
+    
+    # Füge neuen Benutzer hinzu
+    users[username] = {
+        'password': hash_password(password),
+        'email': email,
+        'created': datetime.now().strftime("%Y-%m-%d %H:%M"),
+        'profile': {
+            'bio': '',
+            'position': '',
+            'company': ''
+        },
+        'shared_projects': []
+    }
+    
+    # Speichere in secrets.toml
+    with open('.streamlit/secrets.toml', 'a') as f:
+        f.write(f'\n[USERS.{username}]\n')
+        f.write(f'password = "{users[username]["password"]}"\n')
+        f.write(f'email = "{email}"\n')
+    
+    return True, "Registrierung erfolgreich"
+
 def check_credentials(username, password):
     """Überprüft die Anmeldedaten gegen die gespeicherten Secrets"""
-    users = st.secrets.get("USERS", {})
+    users = dict(st.secrets.get("USERS", {}))
     if username in users:
-        stored_password = users[username]
+        stored_password = users[username].get('password', users[username])  # Unterstützt beide Formate
         return stored_password == hash_password(password)
     return False
 
