@@ -155,6 +155,8 @@ def main():
     
     if 'processed_files' not in st.session_state:
         st.session_state.processed_files = set()
+    if 'transcripts' not in st.session_state:
+        st.session_state.transcripts = {}
     
     uploaded_file = st.file_uploader("Video hochladen (max 100MB)", type=['mp4', 'mov', 'avi'])
     
@@ -162,7 +164,37 @@ def main():
         file_hash = hash(uploaded_file.getvalue())
         
         if file_hash in st.session_state.processed_files:
-            st.info("Diese Datei wurde bereits verarbeitet. Lade eine neue Datei hoch für eine neue Analyse.")
+            st.info("Diese Datei wurde bereits transkribiert. Starte direkt die Analyse...")
+            
+            # Hole gespeicherte Transkription
+            transcript = st.session_state.transcripts.get(file_hash)
+            
+            if st.button("Neu analysieren"):
+                status_container = st.empty()
+                result_container = st.empty()
+                
+                # GPT Analyse
+                with status_container:
+                    st.info("🧠 Analysiere mit GPT-4...")
+                
+                analysis = summarize_with_gpt(transcript)
+                
+                # Zeige Ergebnisse
+                status_container.empty()
+                
+                with result_container.container():
+                    st.success("✅ Analyse abgeschlossen!")
+                    
+                    # Transkription
+                    with st.expander("📝 Transkription", expanded=False):
+                        st.text_area("", transcript, height=200)
+                    
+                    # GPT Analyse
+                    with st.expander("🔍 Analyse", expanded=True):
+                        st.markdown(analysis)
+                    
+                    # Erfolgsanimation
+                    st.balloons()
         else:
             if st.button("Analysieren"):
                 status_container = st.empty()
@@ -176,12 +208,15 @@ def main():
                 transcript = transcribe_video(uploaded_file)
                 
                 if transcript:
+                    # Speichere Transkription
+                    st.session_state.processed_files.add(file_hash)
+                    st.session_state.transcripts[file_hash] = transcript
+                    
                     # GPT Analyse
                     with status_container:
                         st.info("🧠 Analysiere mit GPT-4...")
                     
                     analysis = summarize_with_gpt(transcript)
-                    st.session_state.processed_files.add(file_hash)
                     
                     # Zeige Ergebnisse
                     status_container.empty()
