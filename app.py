@@ -5,103 +5,83 @@ import tempfile
 import os
 from pathlib import Path
 import subprocess
+import torch
 
 # OpenAI API Key aus den Umgebungsvariablen oder Streamlit Secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # Lade das Whisper-Modell beim Start
-@st.cache_resource  # Cache das Modell zwischen Runs
+@st.cache_resource
 def load_whisper_model():
-    return whisper.load_model("base")
-
-# Initialisiere das Modell
-model = load_whisper_model()
+    # Prüfe CUDA-Verfügbarkeit
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    st.info(f"Nutze Device: {device}")
+    return whisper.load_model("base").to(device)
 
 def transcribe_video(uploaded_file):
     try:
-        # Erstelle temporäre Datei mit korrekter Dateierweiterung
-        suffix = os.path.splitext(uploaded_file.name)[1]
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(uploaded_file.getvalue())
-            tmp_path = tmp.name
-
-        # Konvertiere Video zu Audio mit verbesserten Parametern
-        audio_path = tmp_path + '.wav'
-        try:
-            # Prüfe zuerst die Eingabedatei
-            probe_command = [
-                'ffmpeg',
-                '-i', tmp_path,
-                '-hide_banner'
-            ]
-            probe_result = subprocess.run(
-                probe_command,
-                capture_output=True,
-                text=True
-            )
+        # Debug-Information
+        st.info(f"Verarbeite Datei: {uploaded_file.name} ({uploaded_file.size} bytes)")
+        
+        # Erstelle temporäre Datei
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_video:
+            tmp_video.write(uploaded_file.getvalue())
+            video_path = tmp_video.name
             
-            # Konvertiere zu Audio
-            command = [
-                'ffmpeg',
-                '-i', tmp_path,
-                '-vn',                # Keine Video-Ausgabe
-                '-acodec', 'pcm_s16le', # Audio-Codec
-                '-ar', '16000',       # Sample rate
-                '-ac', '1',           # Mono
-                '-f', 'wav',          # Format erzwingen
-                '-y',                 # Überschreibe Ausgabedatei
-                audio_path
-            ]
-            
-            # Führe Konvertierung aus
-            process = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            
-            # Prüfe die Ausgabedatei
-            if not os.path.exists(audio_path):
-                st.error("Audiodatei wurde nicht erstellt")
-                return None
-                
-            if os.path.getsize(audio_path) < 1024:  # Kleiner als 1KB
-                st.error("Audiodatei ist zu klein oder leer")
-                return None
-                
-            # Versuche die Audio-Datei zu lesen
-            with open(audio_path, 'rb') as audio_file:
-                audio_data = audio_file.read()
-                if len(audio_data) < 1024:
-                    st.error("Audio-Daten sind zu klein")
-                    return None
-
-            # Transkribiere Audio
-            st.info("Starte Transkription...")
-            result = model.transcribe(audio_path)
-            
-            if not result or not result.get("text"):
-                st.error("Keine Transkription erzeugt")
-                return None
-                
-            return result["text"]
-
-        except subprocess.CalledProcessError as e:
-            st.error(f"Fehler bei der Audio-Konvertierung: {e.stderr}")
+        # Erstelle Audio-Pfad
+        audio_path = video_path + '.wav'
+        
+        # FFmpeg-Befehl mit Debug-Output
+        command = [
+            'ffmpeg',
+            '-i', video_path,
+            '-vn',
+            '-acodec', 'pcm_s16le',
+            '-ar', '16000',
+            '-ac', '1',
+            '-f', 'wav',
+            audio_path
+        ]
+        
+        st.info("Starte Audio-Konvertierung...")
+        result = subprocess.run(command, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            st.error(f"FFmpeg Fehler: {result.stderr}")
             return None
-        finally:
-            # Cleanup
-            try:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-                if os.path.exists(audio_path):
-                    os.unlink(audio_path)
-            except Exception as e:
-                st.warning(f"Cleanup-Fehler: {str(e)}")
-
+            
+        if not os.path.exists(audio_path):
+            st.error("Audio-Datei wurde nicht erstellt")
+            return None
+            
+        # Audio-Datei-Info
+        st.info(f"Audio-Datei erstellt: {os.path.getsize(audio_path)} bytes")
+        
+        # Lade Modell neu
+        model = load_whisper_model()
+        
+        # Transkribiere mit expliziten Parametern
+        st.info("Starte Transkription...")
+        transcription = model.transcribe(
+            audio_path,
+            fp16=False,  # Verwende float32
+            language='de'  # Explizite Sprache
+        )
+        
+        # Cleanup
+        os.unlink(video_path)
+        os.unlink(audio_path)
+        
+        if not transcription or not transcription.get("text"):
+            st.error("Keine Transkription erzeugt")
+            return None
+            
+        return transcription["text"]
+        
     except Exception as e:
         st.error(f"Fehler bei der Verarbeitung: {str(e)}")
+        import traceback
+        st.error(f"Stacktrace: {traceback.format_exc()}")
         return None
 
 def summarize_with_gpt(transcript):
