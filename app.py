@@ -20,18 +20,24 @@ def load_whisper_model():
 
 def transcribe_video(uploaded_file):
     try:
+        # Erstelle einen Fortschrittsbalken
+        progress_text = "Verarbeite Video..."
+        progress_bar = st.progress(0, text=progress_text)
+        
         # Debug-Information
         st.info(f"Verarbeite Datei: {uploaded_file.name} ({uploaded_file.size} bytes)")
+        progress_bar.progress(10, "Erstelle temporäre Dateien...")
         
         # Erstelle temporäre Datei
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_video:
             tmp_video.write(uploaded_file.getvalue())
             video_path = tmp_video.name
-            
+        
         # Erstelle Audio-Pfad
         audio_path = video_path + '.wav'
         
-        # FFmpeg-Befehl mit Debug-Output
+        # FFmpeg-Befehl
+        progress_bar.progress(20, "Konvertiere Audio...")
         command = [
             'ffmpeg',
             '-i', video_path,
@@ -43,32 +49,34 @@ def transcribe_video(uploaded_file):
             audio_path
         ]
         
-        st.info("Starte Audio-Konvertierung...")
         result = subprocess.run(command, capture_output=True, text=True)
         
         if result.returncode != 0:
             st.error(f"FFmpeg Fehler: {result.stderr}")
             return None
             
-        if not os.path.exists(audio_path):
-            st.error("Audio-Datei wurde nicht erstellt")
-            return None
-            
-        # Audio-Datei-Info
+        progress_bar.progress(40, "Audio-Konvertierung abgeschlossen...")
         st.info(f"Audio-Datei erstellt: {os.path.getsize(audio_path)} bytes")
         
-        # Lade Modell neu
+        # Lade Modell
+        progress_bar.progress(50, "Lade Whisper Modell...")
         model = load_whisper_model()
         
-        # Transkribiere mit expliziten Parametern
-        st.info("Starte Transkription...")
+        # Teile die Transkription in Segmente
+        progress_bar.progress(60, "Starte Transkription (dies kann einige Minuten dauern)...")
+        
+        # Transkribiere mit optimierten Parametern
         transcription = model.transcribe(
             audio_path,
-            fp16=False,  # Verwende float32
-            language='de'  # Explizite Sprache
+            fp16=False,
+            language='de',
+            initial_prompt="Dies ist ein User Interview auf Deutsch.",
+            condition_on_previous_text=True,
+            verbose=True
         )
         
         # Cleanup
+        progress_bar.progress(90, "Räume auf...")
         os.unlink(video_path)
         os.unlink(audio_path)
         
@@ -76,6 +84,7 @@ def transcribe_video(uploaded_file):
             st.error("Keine Transkription erzeugt")
             return None
             
+        progress_bar.progress(100, "Fertig!")
         return transcription["text"]
         
     except Exception as e:
@@ -83,6 +92,15 @@ def transcribe_video(uploaded_file):
         import traceback
         st.error(f"Stacktrace: {traceback.format_exc()}")
         return None
+    finally:
+        # Cleanup im Fehlerfall
+        try:
+            if 'video_path' in locals() and os.path.exists(video_path):
+                os.unlink(video_path)
+            if 'audio_path' in locals() and os.path.exists(audio_path):
+                os.unlink(audio_path)
+        except Exception:
+            pass
 
 def summarize_with_gpt(transcript):
     client = openai.OpenAI()
