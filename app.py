@@ -153,21 +153,18 @@ def summarize_with_gpt(transcript):
 def main():
     st.title("User Interview Analyse Tool")
     
-    # Cache-Warnung
     if 'processed_files' not in st.session_state:
         st.session_state.processed_files = set()
     
     uploaded_file = st.file_uploader("Video hochladen (max 100MB)", type=['mp4', 'mov', 'avi'])
     
     if uploaded_file is not None:
-        # Prüfe ob Datei bereits verarbeitet wurde
         file_hash = hash(uploaded_file.getvalue())
         
         if file_hash in st.session_state.processed_files:
             st.info("Diese Datei wurde bereits verarbeitet. Lade eine neue Datei hoch für eine neue Analyse.")
         else:
             if st.button("Analysieren"):
-                # Status-Container für Fortschritt
                 status_container = st.empty()
                 progress_container = st.empty()
                 result_container = st.empty()
@@ -175,13 +172,18 @@ def main():
                 with status_container:
                     st.info("🎬 Verarbeite Interview...")
                 
-                # Verarbeite Video
+                # Transkription
                 transcript = transcribe_video(uploaded_file)
                 
                 if transcript:
+                    # GPT Analyse
+                    with status_container:
+                        st.info("🧠 Analysiere mit GPT-4...")
+                    
+                    analysis = summarize_with_gpt(transcript)
                     st.session_state.processed_files.add(file_hash)
                     
-                    # Lösche Status und zeige Ergebnisse
+                    # Zeige Ergebnisse
                     status_container.empty()
                     progress_container.empty()
                     
@@ -189,8 +191,12 @@ def main():
                         st.success("✅ Analyse abgeschlossen!")
                         
                         # Transkription
-                        st.subheader("📝 Transkription")
-                        st.text_area("", transcript, height=200)
+                        with st.expander("📝 Transkription", expanded=False):
+                            st.text_area("", transcript, height=200)
+                        
+                        # GPT Analyse
+                        with st.expander("🔍 Analyse", expanded=True):
+                            st.markdown(analysis)
                         
                         # Erfolgsanimation
                         st.balloons()
