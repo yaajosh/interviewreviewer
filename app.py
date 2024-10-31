@@ -9,6 +9,14 @@ import subprocess
 # OpenAI API Key aus den Umgebungsvariablen oder Streamlit Secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
+# Lade das Whisper-Modell beim Start
+@st.cache_resource  # Cache das Modell zwischen Runs
+def load_whisper_model():
+    return whisper.load_model("base")
+
+# Initialisiere das Modell
+model = load_whisper_model()
+
 def transcribe_video(uploaded_file):
     try:
         # Erstelle temporäre Datei mit korrekter Dateierweiterung
@@ -24,15 +32,15 @@ def transcribe_video(uploaded_file):
             st.error("FFmpeg ist nicht korrekt installiert.")
             return None
 
-        # Konvertiere Video zu Audio (falls nötig)
+        # Konvertiere Video zu Audio
         audio_path = tmp_path + '.wav'
         try:
             subprocess.run([
                 'ffmpeg', '-i', tmp_path,
-                '-vn',  # Keine Video-Ausgabe
-                '-acodec', 'pcm_s16le',  # Audio-Codec
-                '-ar', '16000',  # Sample rate
-                '-ac', '1',  # Mono
+                '-vn', 
+                '-acodec', 'pcm_s16le',
+                '-ar', '16000',
+                '-ac', '1',
                 audio_path
             ], capture_output=True, check=True)
         except subprocess.CalledProcessError as e:
@@ -40,7 +48,8 @@ def transcribe_video(uploaded_file):
             return None
 
         # Transkribiere Audio
-        result = model.transcribe(audio_path)
+        with st.spinner('Transkribiere Audio...'):
+            result = model.transcribe(audio_path)
 
         # Cleanup
         os.unlink(tmp_path)
