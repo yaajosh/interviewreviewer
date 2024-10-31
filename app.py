@@ -152,51 +152,50 @@ def summarize_with_gpt(transcript):
 
 def main():
     st.title("User Interview Analyse Tool")
-    st.write("Laden Sie ein Video-Interview hoch, um es zu transkribieren und analysieren zu lassen.")
-
-    uploaded_file = st.file_uploader("Wählen Sie eine Videodatei aus", type=['mp4', 'mov', 'avi'])
-
+    
+    # Cache-Warnung
+    if 'processed_files' not in st.session_state:
+        st.session_state.processed_files = set()
+    
+    uploaded_file = st.file_uploader("Video hochladen (max 100MB)", type=['mp4', 'mov', 'avi'])
+    
     if uploaded_file is not None:
-        if st.button("Analysieren"):
-            # Fortschrittsbalken
-            progress_bar = st.progress(0, "Starte Analyse...")
-            
-            # Status-Container für detaillierte Updates
-            with st.status("🎬 Verarbeite Interview...", expanded=True) as status:
-                # Phase 1: Video-Konvertierung
-                st.write("🎥 Konvertiere Video...")
-                progress_bar.progress(20)
+        # Prüfe ob Datei bereits verarbeitet wurde
+        file_hash = hash(uploaded_file.getvalue())
+        
+        if file_hash in st.session_state.processed_files:
+            st.info("Diese Datei wurde bereits verarbeitet. Lade eine neue Datei hoch für eine neue Analyse.")
+        else:
+            if st.button("Analysieren"):
+                # Status-Container für Fortschritt
+                status_container = st.empty()
+                progress_container = st.empty()
+                result_container = st.empty()
                 
-                # Phase 2: Transkription
-                st.write("🎙️ Erstelle Transkription...")
+                with status_container:
+                    st.info("🎬 Verarbeite Interview...")
+                
+                # Verarbeite Video
                 transcript = transcribe_video(uploaded_file)
-                progress_bar.progress(60)
                 
                 if transcript:
-                    # Phase 3: GPT Analyse
-                    st.write("🧠 Analysiere Inhalt mit GPT-4...")
-                    summary = summarize_with_gpt(transcript)
-                    progress_bar.progress(90)
+                    st.session_state.processed_files.add(file_hash)
                     
-                    # Phase 4: Fertigstellung
-                    st.write("✨ Formatiere Ergebnisse...")
-                    progress_bar.progress(100)
-                    status.update(label="✅ Analyse abgeschlossen!", state="complete", expanded=False)
-
-                    # Ergebnisse anzeigen
-                    st.success("Analyse erfolgreich abgeschlossen!")
+                    # Lösche Status und zeige Ergebnisse
+                    status_container.empty()
+                    progress_container.empty()
                     
-                    with st.expander("📝 Transkription", expanded=True):
+                    with result_container.container():
+                        st.success("✅ Analyse abgeschlossen!")
+                        
+                        # Transkription
+                        st.subheader("📝 Transkription")
                         st.text_area("", transcript, height=200)
-
-                    with st.expander("📊 Analyse", expanded=True):
-                        st.markdown(summary)
-
-                    # Erfolgsanimation
-                    st.balloons()
+                        
+                        # Erfolgsanimation
+                        st.balloons()
                 else:
-                    status.update(label="❌ Fehler bei der Verarbeitung", state="error")
-                    progress_bar.empty()
+                    status_container.error("❌ Fehler bei der Verarbeitung")
 
 if __name__ == "__main__":
     main() 
