@@ -3,155 +3,109 @@ import whisper
 import openai
 import tempfile
 import os
-from pathlib import Path
-import subprocess
-import torch
+import json
+from datetime import datetime
+import hashlib
 
-# OpenAI API Key aus den Umgebungsvariablen oder Streamlit Secrets
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# Initialisiere Session State
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+if 'current_user' not in st.session_state:
+    st.session_state.current_user = None
+if 'current_project' not in st.session_state:
+    st.session_state.current_project = None
+if 'projects' not in st.session_state:
+    st.session_state.projects = {}
 
-# Lade das Whisper-Modell beim Start
-@st.cache_resource
-def load_whisper_model():
-    # Prüfe CUDA-Verfügbarkeit
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    st.info(f"Nutze Device: {device}")
-    return whisper.load_model("base").to(device)
+def hash_password(password):
+    """Einfache Passwort-Hashfunktion"""
+    return hashlib.sha256(password.encode()).hexdigest()
 
-def transcribe_video(uploaded_file):
-    try:
-        # Erstelle einen Fortschrittsbalken
-        progress_text = "Verarbeite Video..."
-        progress_bar = st.progress(0, text=progress_text)
-        
-        # Debug-Information
-        st.info(f"Verarbeite Datei: {uploaded_file.name} ({uploaded_file.size} bytes)")
-        progress_bar.progress(10, "Erstelle temporäre Dateien...")
-        
-        # Erstelle temporäre Datei
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_video:
-            tmp_video.write(uploaded_file.getvalue())
-            video_path = tmp_video.name
-        
-        # Erstelle Audio-Pfad
-        audio_path = video_path + '.wav'
-        
-        # FFmpeg-Befehl
-        progress_bar.progress(20, "Konvertiere Audio...")
-        command = [
-            'ffmpeg',
-            '-i', video_path,
-            '-vn',
-            '-acodec', 'pcm_s16le',
-            '-ar', '16000',
-            '-ac', '1',
-            '-f', 'wav',
-            audio_path
-        ]
-        
-        result = subprocess.run(command, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            st.error(f"FFmpeg Fehler: {result.stderr}")
-            return None
+def check_credentials(username, password):
+    """Überprüft die Anmeldedaten gegen die gespeicherten Secrets"""
+    users = st.secrets.get("USERS", {})
+    if username in users:
+        stored_password = users[username]
+        return stored_password == hash_password(password)
+    return False
+
+def login():
+    st.sidebar.title("🔐 Login")
+    
+    # Login Bereich
+    if not st.session_state.authenticated:
+        with st.sidebar.form("login_form"):
+            username = st.text_input("Benutzername")
+            password = st.text_input("Passwort", type="password")
+            submit = st.form_submit_button("Anmelden")
             
-        progress_bar.progress(40, "Audio-Konvertierung abgeschlossen...")
-        st.info(f"Audio-Datei erstellt: {os.path.getsize(audio_path)} bytes")
+            if submit:
+                if check_credentials(username, password):
+                    st.session_state.authenticated = True
+                    st.session_state.current_user = username
+                    st.experimental_rerun()
+                else:
+                    st.error("Falsche Anmeldedaten!")
+    
+    # Projekt Management (nur wenn eingeloggt)
+    if st.session_state.authenticated:
+        st.sidebar.success(f"✅ Eingeloggt als {st.session_state.current_user}")
         
-        # Lade Modell
-        progress_bar.progress(50, "Lade Whisper Modell...")
-        model = load_whisper_model()
+        # Logout Button
+        if st.sidebar.button("Ausloggen"):
+            st.session_state.authenticated = False
+            st.session_state.current_user = None
+            st.session_state.current_project = None
+            st.experimental_rerun()
         
-        # Teile die Transkription in Segmente
-        progress_bar.progress(60, "Starte Transkription (dies kann einige Minuten dauern)...")
+        st.sidebar.markdown("---")
+        st.sidebar.title("📊 Projekt Manager")
         
-        # Transkribiere mit optimierten Parametern
-        transcription = model.transcribe(
-            audio_path,
-            fp16=False,
-            language='de',
-            initial_prompt="Dies ist ein User Interview auf Deutsch.",
-            condition_on_previous_text=True,
-            verbose=True
-        )
+        # Neues Projekt erstellen
+        with st.sidebar.expander("➕ Neues Projekt"):
+            new_project = st.text_input("Projektname")
+            if st.button("Projekt erstellen") and new_project:
+                project_key = f"{st.session_state.current_user}_{new_project}"
+                if project_key not in st.session_state.projects:
+                    st.session_state.projects[project_key] = {
+                        'name': new_project,
+                        'owner': st.session_state.current_user,
+                        'created': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        'analyses': {}
+                    }
+                    st.success(f"Projekt '{new_project}' erstellt!")
+                    st.experimental_rerun()
         
-        # Cleanup
-        progress_bar.progress(90, "Räume auf...")
-        os.unlink(video_path)
-        os.unlink(audio_path)
+        # Projekt auswählen (nur eigene Projekte)
+        user_projects = {k: v for k, v in st.session_state.projects.items() 
+                        if v['owner'] == st.session_state.current_user}
         
-        if not transcription or not transcription.get("text"):
-            st.error("Keine Transkription erzeugt")
-            return None
+        if user_projects:
+            project_names = [v['name'] for v in user_projects.values()]
+            selected_project = st.sidebar.selectbox(
+                "🎯 Projekt auswählen",
+                project_names
+            )
             
-        progress_bar.progress(100, "Fertig!")
-        return transcription["text"]
-        
-    except Exception as e:
-        st.error(f"Fehler bei der Verarbeitung: {str(e)}")
-        import traceback
-        st.error(f"Stacktrace: {traceback.format_exc()}")
-        return None
-    finally:
-        # Cleanup im Fehlerfall
-        try:
-            if 'video_path' in locals() and os.path.exists(video_path):
-                os.unlink(video_path)
-            if 'audio_path' in locals() and os.path.exists(audio_path):
-                os.unlink(audio_path)
-        except Exception:
-            pass
-
-def summarize_with_gpt(transcript):
-    client = openai.OpenAI()
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[
-            {
-                "role": "system",
-                "content": """Du bist ein erfahrener UX Researcher und Experte für die Analyse von User Interviews. 
-                Analysiere das Interview detailliert und strukturiere deine Erkenntnisse in folgende Kategorien:
-
-                1. Haupterkenntnisse
-                   - Zentrale Aussagen und Kernthemen
-                   - Wichtige Zitate
-                   - Überraschende Einsichten
-
-                2. Nutzerverhalten & Bedürfnisse
-                   - Aktuelle Verhaltensweisen
-                   - Schmerzpunkte und Frustrationen
-                   - Wünsche und Bedürfnisse
-                   - Motivationen
-
-                3. Kontext & Rahmenbedingungen
-                   - Nutzungskontext
-                   - Externe Einflüsse
-                   - Technische Voraussetzungen
-
-                4. Detaillierte Problembereiche
-                   - Spezifische Herausforderungen
-                   - Häufigkeit der Probleme
-                   - Auswirkungen auf den Nutzer
-
-                5. Konkrete Empfehlungen
-                   - Kurzfristige Maßnahmen
-                   - Langfristige Verbesserungen
-                   - Priorisierte Handlungsempfehlungen
-                   - Potenzielle Lösungsansätze
-
-                Formatiere die Ausgabe übersichtlich mit Markdown."""
-            },
-            {
-                "role": "user",
-                "content": f"Hier ist die Transkription eines User Interviews. Bitte analysiere es entsprechend der vorgegebenen Struktur:\n\n{transcript}"
-            }
-        ],
-        temperature=0.7
-    )
-    return response.choices[0].message.content
+            if selected_project:
+                project_key = f"{st.session_state.current_user}_{selected_project}"
+                if project_key != st.session_state.current_project:
+                    st.session_state.current_project = project_key
+                    st.experimental_rerun()
 
 def main():
     st.title("User Interview Analyse Tool")
+    
+    # Login und Projekt Management
+    login()
+    
+    if not st.session_state.authenticated:
+        st.warning("Bitte melden Sie sich an, um das Tool zu nutzen.")
+        return
+    
+    if not st.session_state.current_project:
+        st.warning("Bitte wählen Sie ein Projekt aus oder erstellen Sie ein neues.")
+        return
     
     if 'processed_files' not in st.session_state:
         st.session_state.processed_files = set()
