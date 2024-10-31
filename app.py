@@ -18,109 +18,88 @@ if 'projects' not in st.session_state:
     st.session_state.projects = {}
 
 def hash_password(password):
-    """Einfache Passwort-Hashfunktion"""
     return hashlib.sha256(password.encode()).hexdigest()
 
 def create_user(username, password, email):
     """Erstellt einen neuen Benutzer"""
-    # Lade aktuelle Benutzer aus secrets.toml
     users = dict(st.secrets.get("USERS", {}))
     
     if username in users:
         return False, "Benutzername bereits vergeben"
     
-    # Füge neuen Benutzer hinzu
-    users[username] = {
-        'password': hash_password(password),
-        'email': email,
-        'created': datetime.now().strftime("%Y-%m-%d %H:%M"),
-        'profile': {
-            'bio': '',
-            'position': '',
-            'company': ''
-        },
-        'shared_projects': []
+    hashed_password = hash_password(password)
+    
+    # Speichere in Session State für sofortige Nutzung
+    st.session_state.temp_users = st.session_state.get('temp_users', {})
+    st.session_state.temp_users[username] = {
+        'password': hashed_password,
+        'email': email
     }
     
-    # Speichere in secrets.toml
-    with open('.streamlit/secrets.toml', 'a') as f:
-        f.write(f'\n[USERS.{username}]\n')
-        f.write(f'password = "{users[username]["password"]}"\n')
-        f.write(f'email = "{email}"\n')
-    
-    return True, "Registrierung erfolgreich"
+    return True, "Registrierung erfolgreich! Bitte loggen Sie sich ein."
 
 def check_credentials(username, password):
-    """Überprüft die Anmeldedaten gegen die gespeicherten Secrets"""
+    """Überprüft die Anmeldedaten"""
     users = dict(st.secrets.get("USERS", {}))
+    temp_users = st.session_state.get('temp_users', {})
+    
+    # Prüfe temporäre und permanente Benutzer
     if username in users:
-        stored_password = users[username].get('password', users[username])  # Unterstützt beide Formate
+        stored_password = users[username]
+        return stored_password == hash_password(password)
+    elif username in temp_users:
+        stored_password = temp_users[username]['password']
         return stored_password == hash_password(password)
     return False
 
 def login():
     st.sidebar.title("🔐 Login")
     
-    # Login Bereich
     if not st.session_state.authenticated:
-        with st.sidebar.form("login_form"):
-            username = st.text_input("Benutzername")
-            password = st.text_input("Passwort", type="password")
-            submit = st.form_submit_button("Anmelden")
-            
-            if submit:
-                if check_credentials(username, password):
-                    st.session_state.authenticated = True
-                    st.session_state.current_user = username
-                    st.experimental_rerun()
-                else:
-                    st.error("Falsche Anmeldedaten!")
+        tab1, tab2 = st.sidebar.tabs(["🔑 Login", "📝 Registrierung"])
+        
+        with tab1:
+            with st.form("login_form"):
+                username = st.text_input("Benutzername")
+                password = st.text_input("Passwort", type="password")
+                submit = st.form_submit_button("Anmelden")
+                
+                if submit:
+                    if check_credentials(username, password):
+                        st.session_state.authenticated = True
+                        st.session_state.current_user = username
+                        st.experimental_rerun()
+                    else:
+                        st.error("Falsche Anmeldedaten!")
+        
+        with tab2:
+            with st.form("register_form"):
+                new_username = st.text_input("Benutzername")
+                new_password = st.text_input("Passwort", type="password")
+                confirm_password = st.text_input("Passwort bestätigen", type="password")
+                email = st.text_input("E-Mail")
+                register = st.form_submit_button("Registrieren")
+                
+                if register:
+                    if not new_username or not new_password:
+                        st.error("Bitte füllen Sie alle Felder aus!")
+                    elif new_password != confirm_password:
+                        st.error("Passwörter stimmen nicht überein!")
+                    else:
+                        success, message = create_user(new_username, new_password, email)
+                        if success:
+                            st.success(message)
+                        else:
+                            st.error(message)
     
-    # Projekt Management (nur wenn eingeloggt)
-    if st.session_state.authenticated:
+    else:
         st.sidebar.success(f"✅ Eingeloggt als {st.session_state.current_user}")
         
-        # Logout Button
         if st.sidebar.button("Ausloggen"):
             st.session_state.authenticated = False
             st.session_state.current_user = None
             st.session_state.current_project = None
             st.experimental_rerun()
-        
-        st.sidebar.markdown("---")
-        st.sidebar.title("📊 Projekt Manager")
-        
-        # Neues Projekt erstellen
-        with st.sidebar.expander("➕ Neues Projekt"):
-            new_project = st.text_input("Projektname")
-            if st.button("Projekt erstellen") and new_project:
-                project_key = f"{st.session_state.current_user}_{new_project}"
-                if project_key not in st.session_state.projects:
-                    st.session_state.projects[project_key] = {
-                        'name': new_project,
-                        'owner': st.session_state.current_user,
-                        'created': datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        'analyses': {}
-                    }
-                    st.success(f"Projekt '{new_project}' erstellt!")
-                    st.experimental_rerun()
-        
-        # Projekt auswählen (nur eigene Projekte)
-        user_projects = {k: v for k, v in st.session_state.projects.items() 
-                        if v['owner'] == st.session_state.current_user}
-        
-        if user_projects:
-            project_names = [v['name'] for v in user_projects.values()]
-            selected_project = st.sidebar.selectbox(
-                "🎯 Projekt auswählen",
-                project_names
-            )
-            
-            if selected_project:
-                project_key = f"{st.session_state.current_user}_{selected_project}"
-                if project_key != st.session_state.current_project:
-                    st.session_state.current_project = project_key
-                    st.experimental_rerun()
 
 def main():
     st.title("User Interview Analyse Tool")
