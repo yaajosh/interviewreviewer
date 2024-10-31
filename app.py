@@ -4,24 +4,53 @@ import openai
 import tempfile
 import os
 from pathlib import Path
+import subprocess
 
 # OpenAI API Key aus den Umgebungsvariablen oder Streamlit Secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-def transcribe_video(video_file):
-    # Temporäre Datei erstellen
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
-        tmp_file.write(video_file.getvalue())
-        tmp_path = tmp_file.name
+def transcribe_video(uploaded_file):
+    try:
+        # Erstelle temporäre Datei mit korrekter Dateierweiterung
+        suffix = os.path.splitext(uploaded_file.name)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(uploaded_file.getvalue())
+            tmp_path = tmp.name
 
-    # Whisper Modell laden und Transkription durchführen
-    model = whisper.load_model("base")
-    result = model.transcribe(tmp_path)
-    
-    # Temporäre Datei löschen
-    os.unlink(tmp_path)
-    
-    return result["text"]
+        # Prüfe, ob ffmpeg verfügbar ist
+        try:
+            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+        except subprocess.CalledProcessError:
+            st.error("FFmpeg ist nicht korrekt installiert.")
+            return None
+
+        # Konvertiere Video zu Audio (falls nötig)
+        audio_path = tmp_path + '.wav'
+        try:
+            subprocess.run([
+                'ffmpeg', '-i', tmp_path,
+                '-vn',  # Keine Video-Ausgabe
+                '-acodec', 'pcm_s16le',  # Audio-Codec
+                '-ar', '16000',  # Sample rate
+                '-ac', '1',  # Mono
+                audio_path
+            ], capture_output=True, check=True)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Fehler bei der Audio-Konvertierung: {e.stderr.decode()}")
+            return None
+
+        # Transkribiere Audio
+        result = model.transcribe(audio_path)
+
+        # Cleanup
+        os.unlink(tmp_path)
+        os.unlink(audio_path)
+
+        return result["text"]
+
+    except Exception as e:
+        st.error(f"Fehler bei der Verarbeitung: {str(e)}")
+        return None
 
 def summarize_with_gpt(transcript):
     client = openai.OpenAI()
