@@ -4,106 +4,82 @@ import openai
 import tempfile
 import os
 from datetime import datetime
-import hashlib
 from supabase import create_client
+import uuid
 
 # Supabase Setup
 @st.cache_resource
-def init_db():
+def init_supabase():
     try:
-        supabase = create_client(
+        return create_client(
             st.secrets["SUPABASE_URL"],
             st.secrets["SUPABASE_KEY"]
         )
-        return supabase
     except Exception as e:
         st.error(f"Datenbankverbindung fehlgeschlagen: {str(e)}")
         return None
 
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-# Benutzer-Management
-def create_user(username, password, email):
+def sign_up(email, password):
+    """Registriert einen neuen Benutzer"""
     try:
-        supabase = init_db()
+        supabase = init_supabase()
+        response = supabase.auth.sign_up({
+            "email": email,
+            "password": password
+        })
         
-        # Prüfe ob Benutzer existiert
-        response = supabase.table('users').select('username').eq('username', username).execute()
-        if len(response.data) > 0:
-            return False, "Benutzername bereits vergeben"
-        
-        user_data = {
-            'username': username,
-            'password': hash_password(password),
-            'email': email,
-            'created_at': datetime.now().isoformat(),
-            'profile': {}
-        }
-        
-        supabase.table('users').insert(user_data).execute()
-        return True, "Registrierung erfolgreich! Bitte loggen Sie sich ein."
+        if response.user:
+            # Erstelle Profil
+            profile_data = {
+                "id": response.user.id,
+                "email": email,
+                "username": email.split('@')[0],  # Einfacher Username aus Email
+            }
+            supabase.table('profiles').insert(profile_data).execute()
+            
+            return True, "Registrierung erfolgreich! Bitte bestätigen Sie Ihre E-Mail."
     except Exception as e:
         return False, f"Fehler bei der Registrierung: {str(e)}"
 
-def check_credentials(username, password):
+def sign_in(email, password):
+    """Meldet einen Benutzer an"""
     try:
-        supabase = init_db()
-        response = supabase.table('users').select('password').eq('username', username).execute()
+        supabase = init_supabase()
+        response = supabase.auth.sign_in_with_password({
+            "email": email,
+            "password": password
+        })
         
-        if len(response.data) > 0 and response.data[0]['password'] == hash_password(password):
-            return True
-        return False
+        if response.user:
+            return True, response.user
+        return False, "Anmeldung fehlgeschlagen"
     except Exception as e:
-        st.error(f"Fehler bei der Anmeldung: {str(e)}")
-        return False
+        return False, f"Fehler bei der Anmeldung: {str(e)}"
 
-def get_user_projects(username):
+def get_user_projects(user_id):
+    """Holt alle Projekte eines Benutzers"""
     try:
-        supabase = init_db()
-        response = supabase.table('projects').select('*').eq('owner', username).execute()
+        supabase = init_supabase()
+        response = supabase.table('projects').select('*').eq('owner_id', user_id).execute()
         return response.data
     except Exception as e:
         st.error(f"Fehler beim Laden der Projekte: {str(e)}")
         return []
 
-def create_project(name, description, owner):
+def create_project(name, description, owner_id):
+    """Erstellt ein neues Projekt"""
     try:
-        supabase = init_db()
-        
+        supabase = init_supabase()
         project_data = {
-            'name': name,
-            'description': description,
-            'owner': owner,
-            'created_at': datetime.now().isoformat(),
-            'analyses': []
+            "name": name,
+            "description": description,
+            "owner_id": owner_id
         }
         
-        supabase.table('projects').insert(project_data).execute()
+        response = supabase.table('projects').insert(project_data).execute()
         return True, "Projekt erfolgreich erstellt!"
     except Exception as e:
         return False, f"Fehler beim Erstellen des Projekts: {str(e)}"
-
-def save_analysis_to_db(project_name, transcript, analysis):
-    try:
-        supabase = init_db()
-        
-        analysis_data = {
-            'transcript': transcript,
-            'analysis': analysis,
-            'created_at': datetime.now().isoformat()
-        }
-        
-        # Projekt finden und Analyse hinzufügen
-        response = supabase.table('projects').select('analyses').eq('name', project_name).execute()
-        if len(response.data) > 0:
-            analyses = response.data[0]['analyses']
-            analyses.append(analysis_data)
-            
-            supabase.table('projects').update({'analyses': analyses}).eq('name', project_name).execute()
-            st.success("✅ Analyse wurde im Projekt gespeichert!")
-    except Exception as e:
-        st.error(f"❌ Fehler beim Speichern der Analyse: {str(e)}")
 
 def login():
     st.sidebar.title("🔐 Login")
@@ -113,40 +89,41 @@ def login():
         
         with tab1:
             with st.form("login_form"):
-                username = st.text_input("Benutzername")
+                email = st.text_input("E-Mail")
                 password = st.text_input("Passwort", type="password")
                 submit = st.form_submit_button("Anmelden")
                 
                 if submit:
-                    if check_credentials(username, password):
+                    success, result = sign_in(email, password)
+                    if success:
                         st.session_state.authenticated = True
-                        st.session_state.current_user = username
+                        st.session_state.user = result
                         st.rerun()
                     else:
-                        st.error("Falsche Anmeldedaten!")
+                        st.error(result)
         
         with tab2:
             with st.form("register_form"):
-                new_username = st.text_input("Benutzername")
-                new_password = st.text_input("Passwort", type="password")
-                confirm_password = st.text_input("Passwort bestätigen", type="password")
                 email = st.text_input("E-Mail")
+                password = st.text_input("Passwort", type="password")
+                confirm_password = st.text_input("Passwort bestätigen", type="password")
                 register = st.form_submit_button("Registrieren")
                 
                 if register:
-                    if not new_username or not new_password:
+                    if not email or not password:
                         st.error("Bitte füllen Sie alle Felder aus!")
-                    elif new_password != confirm_password:
+                    elif password != confirm_password:
                         st.error("Passwörter stimmen nicht überein!")
                     else:
-                        success, message = create_user(new_username, new_password, email)
+                        success, message = sign_up(email, password)
                         if success:
                             st.success(message)
                         else:
                             st.error(message)
     
     else:
-        st.sidebar.success(f"✅ Eingeloggt als {st.session_state.current_user}")
+        user = st.session_state.user
+        st.sidebar.success(f"✅ Eingeloggt als {user.email}")
         
         # Projekt Management
         st.sidebar.markdown("---")
@@ -160,7 +137,11 @@ def login():
                 create_project_btn = st.form_submit_button("Projekt erstellen")
                 
                 if create_project_btn and new_project:
-                    success, message = create_project(new_project, project_description, st.session_state.current_user)
+                    success, message = create_project(
+                        new_project, 
+                        project_description, 
+                        user.id
+                    )
                     if success:
                         st.success(message)
                         st.rerun()
@@ -168,20 +149,21 @@ def login():
                         st.error(message)
         
         # Projekte anzeigen
-        projects = get_user_projects(st.session_state.current_user)
+        projects = get_user_projects(user.id)
         if projects:
             selected_project = st.sidebar.selectbox(
                 "🎯 Projekt auswählen",
-                options=[p['name'] for p in projects]
+                options=[p['name'] for p in projects],
+                key='project_selector'
             )
             if selected_project:
                 st.session_state.current_project = selected_project
         
         # Ausloggen
         if st.sidebar.button("Ausloggen"):
-            st.session_state.authenticated = False
-            st.session_state.current_user = None
-            st.session_state.current_project = None
+            supabase = init_supabase()
+            supabase.auth.sign_out()
+            st.session_state.clear()
             st.rerun()
 
 def main():
