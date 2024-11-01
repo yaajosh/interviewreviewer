@@ -1,57 +1,89 @@
 import streamlit as st
-import whisper
-import openai
-import tempfile
-import os
-import json
-from datetime import datetime
 import hashlib
+from datetime import datetime
+from pymongo import MongoClient
+from bson import ObjectId
 
-# Initialisiere Session State
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-if 'current_user' not in st.session_state:
-    st.session_state.current_user = None
-if 'current_project' not in st.session_state:
-    st.session_state.current_project = None
-if 'projects' not in st.session_state:
-    st.session_state.projects = {}
+# MongoDB Verbindung
+@st.cache_resource
+def init_db():
+    client = MongoClient(st.secrets["MONGODB_URI"])
+    return client.interview_analyzer
 
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
+# Datenbank-Operationen
 def create_user(username, password, email):
     """Erstellt einen neuen Benutzer"""
-    users = dict(st.secrets.get("USERS", {}))
+    db = init_db()
     
-    if username in users:
+    # Prüfe ob Benutzer existiert
+    if db.users.find_one({"username": username}):
         return False, "Benutzername bereits vergeben"
     
-    hashed_password = hash_password(password)
-    
-    # Speichere in Session State für sofortige Nutzung
-    st.session_state.temp_users = st.session_state.get('temp_users', {})
-    st.session_state.temp_users[username] = {
-        'password': hashed_password,
-        'email': email
+    # Erstelle neuen Benutzer
+    user = {
+        'username': username,
+        'password': hash_password(password),
+        'email': email,
+        'created': datetime.now(),
+        'profile': {
+            'bio': '',
+            'position': '',
+            'company': ''
+        }
     }
     
+    db.users.insert_one(user)
     return True, "Registrierung erfolgreich! Bitte loggen Sie sich ein."
 
 def check_credentials(username, password):
     """Überprüft die Anmeldedaten"""
-    users = dict(st.secrets.get("USERS", {}))
-    temp_users = st.session_state.get('temp_users', {})
+    db = init_db()
+    user = db.users.find_one({"username": username})
     
-    # Prüfe temporäre und permanente Benutzer
-    if username in users:
-        stored_password = users[username]
-        return stored_password == hash_password(password)
-    elif username in temp_users:
-        stored_password = temp_users[username]['password']
-        return stored_password == hash_password(password)
+    if user and user['password'] == hash_password(password):
+        return True
     return False
 
+def get_user_projects(username):
+    """Holt alle Projekte eines Benutzers"""
+    db = init_db()
+    return list(db.projects.find({"owner": username}))
+
+def create_project(name, description, owner):
+    """Erstellt ein neues Projekt"""
+    db = init_db()
+    
+    # Prüfe ob Projekt existiert
+    if db.projects.find_one({"name": name, "owner": owner}):
+        return False, "Ein Projekt mit diesem Namen existiert bereits!"
+    
+    project = {
+        'name': name,
+        'description': description,
+        'owner': owner,
+        'created': datetime.now(),
+        'analyses': []
+    }
+    
+    db.projects.insert_one(project)
+    return True, "Projekt erfolgreich erstellt!"
+
+def save_analysis(project_id, transcript, analysis):
+    """Speichert eine neue Analyse"""
+    db = init_db()
+    
+    analysis_data = {
+        'transcript': transcript,
+        'analysis': analysis,
+        'created': datetime.now()
+    }
+    
+    db.projects.update_one(
+        {"_id": ObjectId(project_id)},
+        {"$push": {"analyses": analysis_data}}
+    )
+
+# Rest des Codes bleibt größtenteils gleich, nur die Datenspeicherung wird angepasst
 def login():
     st.sidebar.title("🔐 Login")
     
@@ -91,85 +123,3 @@ def login():
                             st.success(message)
                         else:
                             st.error(message)
-    
-    else:
-        st.sidebar.success(f"✅ Eingeloggt als {st.session_state.current_user}")
-        
-        # Projekt Management
-        st.sidebar.markdown("---")
-        st.sidebar.title("📊 Projekt Manager")
-        
-        # Neues Projekt erstellen
-        with st.sidebar.expander("➕ Neues Projekt"):
-            with st.form("new_project_form"):
-                new_project = st.text_input("Projektname")
-                project_description = st.text_area("Projektbeschreibung", height=100)
-                create_project = st.form_submit_button("Projekt erstellen")
-                
-                if create_project and new_project:
-                    project_key = f"{st.session_state.current_user}_{new_project}"
-                    if project_key not in st.session_state.projects:
-                        st.session_state.projects[project_key] = {
-                            'name': new_project,
-                            'description': project_description,
-                            'owner': st.session_state.current_user,
-                            'created': datetime.now().strftime("%Y-%m-%d %H:%M"),
-                            'analyses': {}
-                        }
-                        st.success(f"Projekt '{new_project}' erstellt!")
-                        st.rerun()
-                    else:
-                        st.error("Ein Projekt mit diesem Namen existiert bereits!")
-        
-        # Projekt auswählen
-        if st.session_state.projects:
-            user_projects = {k: v for k, v in st.session_state.projects.items() 
-                           if v['owner'] == st.session_state.current_user}
-            
-            if user_projects:
-                project_names = [v['name'] for v in user_projects.values()]
-                selected_project = st.sidebar.selectbox(
-                    "🎯 Projekt auswählen",
-                    project_names
-                )
-                
-                if selected_project:
-                    project_key = f"{st.session_state.current_user}_{selected_project}"
-                    if project_key != st.session_state.current_project:
-                        st.session_state.current_project = project_key
-                        st.rerun()
-        
-        # Ausloggen
-        if st.sidebar.button("Ausloggen"):
-            st.session_state.authenticated = False
-            st.session_state.current_user = None
-            st.session_state.current_project = None
-            st.rerun()
-
-def main():
-    st.title("User Interview Analyse Tool")
-    
-    # Login und Projekt Management
-    login()
-    
-    if not st.session_state.authenticated:
-        st.warning("Bitte melden Sie sich an, um das Tool zu nutzen.")
-        return
-    
-    if not st.session_state.current_project:
-        st.warning("Bitte wählen Sie ein Projekt aus oder erstellen Sie ein neues.")
-        return
-    
-    # Zeige aktives Projekt
-    project = st.session_state.projects[st.session_state.current_project]
-    st.write(f"🎯 Aktives Projekt: **{project['name']}**")
-    
-    # Projekt Details
-    with st.expander("📋 Projekt Details", expanded=False):
-        st.write(f"**Beschreibung:** {project['description']}")
-        st.write(f"**Erstellt am:** {project['created']}")
-        st.write(f"**Besitzer:** {project['owner']}")
-        st.write(f"**Analysen:** {len(project['analyses'])}")
-
-if __name__ == "__main__":
-    main() 
