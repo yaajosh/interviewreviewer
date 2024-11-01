@@ -82,8 +82,6 @@ def create_project(name, description, owner_id):
         return False, f"Fehler beim Erstellen des Projekts: {str(e)}"
 
 def login():
-    st.sidebar.title("🔐 Login")
-    
     if not st.session_state.get('authenticated', False):
         tab1, tab2 = st.sidebar.tabs(["🔑 Login", "📝 Registrierung"])
         
@@ -120,51 +118,86 @@ def login():
                             st.success(message)
                         else:
                             st.error(message)
-    
     else:
-        user = st.session_state.user
-        st.sidebar.success(f"✅ Eingeloggt als {user.email}")
-        
-        # Projekt Management
-        st.sidebar.markdown("---")
-        st.sidebar.title("📊 Projekt Manager")
-        
-        # Neues Projekt erstellen
-        with st.sidebar.expander("➕ Neues Projekt"):
-            with st.form("new_project_form"):
-                new_project = st.text_input("Projektname")
-                project_description = st.text_area("Projektbeschreibung", height=100)
-                create_project_btn = st.form_submit_button("Projekt erstellen")
-                
-                if create_project_btn and new_project:
-                    success, message = create_project(
-                        new_project, 
-                        project_description, 
-                        user.id
-                    )
-                    if success:
-                        st.success(message)
-                        st.rerun()
-                    else:
-                        st.error(message)
-        
-        # Projekte anzeigen
-        projects = get_user_projects(user.id)
-        if projects:
-            selected_project = st.sidebar.selectbox(
-                "🎯 Projekt auswählen",
-                options=[p['name'] for p in projects],
-                key='project_selector'
-            )
-            if selected_project:
-                st.session_state.current_project = selected_project
-        
-        # Ausloggen
-        if st.sidebar.button("Ausloggen"):
-            supabase = init_supabase()
-            supabase.auth.sign_out()
-            st.session_state.clear()
-            st.rerun()
+        # Profil-Bereich
+        with st.sidebar:
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                st.image("https://api.dicebear.com/7.x/initials/svg?seed=" + st.session_state.user.email, 
+                        width=50)
+            with col2:
+                st.markdown(f"""
+                    <div style='padding: 0.5rem;'>
+                        <small style='color: #888;'>Eingeloggt als</small><br>
+                        <strong>{st.session_state.user.email}</strong>
+                    </div>
+                """, unsafe_allow_html=True)
+            
+            st.divider()
+            
+            # Projekte Bereich
+            st.markdown("### 📂 Projekte")
+            
+            # Neues Projekt Button
+            if st.button("+ Neues Projekt", type="primary", use_container_width=True):
+                st.session_state.show_new_project = True
+            
+            # Modal für neues Projekt
+            if st.session_state.get('show_new_project', False):
+                with st.modal("Neues Projekt erstellen", key="new_project_modal"):
+                    with st.form("new_project_form"):
+                        new_project = st.text_input("Projektname")
+                        project_description = st.text_area("Beschreibung")
+                        col1, col2 = st.columns([1,1])
+                        with col1:
+                            if st.form_submit_button("Erstellen", type="primary"):
+                                success, message = create_project(
+                                    new_project, 
+                                    project_description, 
+                                    st.session_state.user.id
+                                )
+                                if success:
+                                    st.success(message)
+                                    st.session_state.show_new_project = False
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                        with col2:
+                            if st.form_submit_button("Abbrechen"):
+                                st.session_state.show_new_project = False
+                                st.rerun()
+            
+            # Projekte Liste
+            projects = get_user_projects(st.session_state.user.id)
+            if projects:
+                for project in projects:
+                    with st.container():
+                        col1, col2 = st.columns([4,1])
+                        with col1:
+                            if st.button(
+                                f"📁 {project['name']}", 
+                                key=f"project_{project['name']}", 
+                                use_container_width=True
+                            ):
+                                st.session_state.current_project = project['name']
+                                st.rerun()
+                        with col2:
+                            if st.button(
+                                "⋮", 
+                                key=f"menu_{project['name']}", 
+                                use_container_width=True
+                            ):
+                                # Hier können wir später Projekt-Optionen hinzufügen
+                                pass
+            else:
+                st.info("Noch keine Projekte vorhanden")
+            
+            st.divider()
+            
+            # Ausloggen am Ende der Sidebar
+            if st.button("🚪 Ausloggen", use_container_width=True):
+                st.session_state.clear()
+                st.rerun()
 
 def main():
     st.title("User Interview Analyse Tool")
@@ -289,4 +322,34 @@ def analyze_transcript(transcript):
     return response.choices[0].message.content
 
 if __name__ == "__main__":
+    st.set_page_config(
+        page_title="Interview Analyzer",
+        page_icon="🎯",
+        layout="wide"
+    )
+
+    st.markdown("""
+    <style>
+        .stButton button {
+            background-color: transparent;
+            border: 1px solid #444;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .stButton button:hover {
+            border-color: #888;
+            background-color: #333;
+        }
+        [data-testid="stSidebar"] {
+            background-color: #1E1E1E;
+        }
+        .st-emotion-cache-1r4qj8v {  /* Modal Hintergrund */
+            background-color: #1E1E1E;
+        }
+        .st-emotion-cache-1r4qj8v h1 {  /* Modal Titel */
+            color: white;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
     main()
