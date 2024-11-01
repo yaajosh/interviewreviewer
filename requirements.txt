@@ -70,3 +70,4 @@ soundfile
 pymongo[srv]
 certifi
 dnspython
+supabase
