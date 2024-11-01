@@ -7,8 +7,16 @@ from bson import ObjectId
 # MongoDB Verbindung
 @st.cache_resource
 def init_db():
-    client = MongoClient(st.secrets["MONGODB_URI"])
-    return client.interview_analyzer
+    try:
+        client = MongoClient(st.secrets["MONGODB_URI"])
+        # Test the connection
+        client.admin.command('ping')
+        db = client.interview_analyzer
+        st.success("Mit Datenbank verbunden!")
+        return db
+    except Exception as e:
+        st.error(f"Datenbankverbindung fehlgeschlagen: {str(e)}")
+        return None
 
 # Datenbank-Operationen
 def create_user(username, password, email):
@@ -123,3 +131,14 @@ def login():
                             st.success(message)
                         else:
                             st.error(message)
+
+def test_db_connection():
+    db = init_db()
+    if db:
+        # Erstelle Collections wenn sie nicht existieren
+        if "users" not in db.list_collection_names():
+            db.create_collection("users")
+        if "projects" not in db.list_collection_names():
+            db.create_collection("projects")
+        return True
+    return False
