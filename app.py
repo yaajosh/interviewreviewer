@@ -18,8 +18,7 @@ def init_db():
             serverSelectionTimeoutMS=5000,
             connectTimeoutMS=5000,
             socketTimeoutMS=5000,
-            tlsAllowInvalidCertificates=True,
-            tlsInsecure=True
+            tlsAllowInvalidCertificates=True  # Nur diese Option
         )
         
         # Test the connection
