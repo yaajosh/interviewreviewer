@@ -11,15 +11,20 @@ import hashlib
 @st.cache_resource
 def init_db():
     try:
-        # Verbindungsoptionen für SSL
+        # Verbindungsoptionen
         client = MongoClient(
             st.secrets["MONGODB_URI"],
-            tls=True,
+            connect=True,
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=5000,
             tlsAllowInvalidCertificates=True,
-            serverSelectionTimeoutMS=5000
+            tlsInsecure=True
         )
+        
         # Test the connection
         client.admin.command('ping')
+        st.success("✅ Datenbankverbindung hergestellt!")
         return client.interview_analyzer
     except Exception as e:
         st.error(f"Datenbankverbindung fehlgeschlagen: {str(e)}")
@@ -30,9 +35,12 @@ def hash_password(password):
 
 # Benutzer-Management
 def create_user(username, password, email):
+    """Erstellt einen neuen Benutzer"""
     try:
         db = init_db()
-        
+        if db is None:
+            return False, "Datenbankverbindung nicht möglich"
+            
         # Prüfe ob Benutzer existiert
         existing_user = db.users.find_one({"username": username})
         if existing_user:

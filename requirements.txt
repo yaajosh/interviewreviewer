@@ -69,3 +69,4 @@ ffmpeg-python
 soundfile
 pymongo[srv]
 certifi
+dnspython
