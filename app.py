@@ -22,63 +22,72 @@ def hash_password(password):
 
 # Benutzer-Management
 def create_user(username, password, email):
-    db = init_db()
-    if not db:
-        return False, "Datenbankverbindung fehlgeschlagen"
-    
-    if db.users.find_one({"username": username}):
-        return False, "Benutzername bereits vergeben"
-    
-    user = {
-        'username': username,
-        'password': hash_password(password),
-        'email': email,
-        'created': datetime.now(),
-        'profile': {
-            'bio': '',
-            'position': '',
-            'company': ''
+    try:
+        db = init_db()
+        
+        # Prüfe ob Benutzer existiert
+        existing_user = db.users.find_one({"username": username})
+        if existing_user:
+            return False, "Benutzername bereits vergeben"
+        
+        user = {
+            'username': username,
+            'password': hash_password(password),
+            'email': email,
+            'created': datetime.now(),
+            'profile': {
+                'bio': '',
+                'position': '',
+                'company': ''
+            }
         }
-    }
-    
-    db.users.insert_one(user)
-    return True, "Registrierung erfolgreich! Bitte loggen Sie sich ein."
+        
+        db.users.insert_one(user)
+        return True, "Registrierung erfolgreich! Bitte loggen Sie sich ein."
+    except Exception as e:
+        return False, f"Fehler bei der Registrierung: {str(e)}"
 
 def check_credentials(username, password):
-    db = init_db()
-    if not db:
+    try:
+        db = init_db()
+        user = db.users.find_one({"username": username})
+        if user and user['password'] == hash_password(password):
+            return True
         return False
-    
-    user = db.users.find_one({"username": username})
-    if user and user['password'] == hash_password(password):
-        return True
-    return False
+    except Exception as e:
+        st.error(f"Fehler bei der Anmeldung: {str(e)}")
+        return False
 
 # Projekt-Management
 def create_project(name, description, owner):
-    db = init_db()
-    if not db:
-        return False, "Datenbankverbindung fehlgeschlagen"
-    
-    if db.projects.find_one({"name": name, "owner": owner}):
-        return False, "Ein Projekt mit diesem Namen existiert bereits!"
-    
-    project = {
-        'name': name,
-        'description': description,
-        'owner': owner,
-        'created': datetime.now(),
-        'analyses': []
-    }
-    
-    db.projects.insert_one(project)
-    return True, "Projekt erfolgreich erstellt!"
+    try:
+        db = init_db()
+        
+        # Prüfe ob Projekt existiert
+        existing_project = db.projects.find_one({"name": name, "owner": owner})
+        if existing_project:
+            return False, "Ein Projekt mit diesem Namen existiert bereits!"
+        
+        project = {
+            'name': name,
+            'description': description,
+            'owner': owner,
+            'created': datetime.now(),
+            'analyses': []
+        }
+        
+        db.projects.insert_one(project)
+        return True, "Projekt erfolgreich erstellt!"
+    except Exception as e:
+        return False, f"Fehler beim Erstellen des Projekts: {str(e)}"
 
 def get_user_projects(username):
-    db = init_db()
-    if not db:
+    try:
+        db = init_db()
+        return list(db.projects.find({"owner": username}))
+    except Exception as e:
+        st.error(f"Fehler beim Laden der Projekte: {str(e)}")
         return []
-    return list(db.projects.find({"owner": username}))
 
 # UI
 def login():
