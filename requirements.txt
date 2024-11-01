@@ -67,3 +67,4 @@ urllib3==2.2.3
 wheel==0.43.0
 ffmpeg-python
 soundfile
+pymongo[srv]
