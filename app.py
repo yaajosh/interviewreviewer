@@ -194,6 +194,86 @@ def main():
     # Hauptbereich für Video-Upload und Analyse
     st.write(f"🎯 Aktives Projekt: **{st.session_state.current_project}**")
     
+    if 'processed_files' not in st.session_state:
+        st.session_state.processed_files = set()
+    if 'transcripts' not in st.session_state:
+        st.session_state.transcripts = {}
+    
+    uploaded_file = st.file_uploader("Video hochladen (max 100MB)", type=['mp4', 'mov', 'avi'])
+    
+    if uploaded_file is not None:
+        file_hash = hash(uploaded_file.getvalue())
+        
+        # Container für Status-Updates
+        status_container = st.empty()
+        
+        if file_hash in st.session_state.processed_files:
+            status_container.info("🔄 Diese Datei wurde bereits verarbeitet")
+            transcript = st.session_state.transcripts.get(file_hash, "")
+            
+            if st.button("🔄 Neu analysieren"):
+                status_container.info("⏳ Analyse wird durchgeführt...")
+                
+                try:
+                    analysis = analyze_transcript(transcript)
+                    status_container.success("✅ Analyse abgeschlossen!")
+                    
+                    with st.expander("📝 Transkription", expanded=False):
+                        st.text_area("", transcript, height=200)
+                    
+                    with st.expander("🔍 Analyse", expanded=True):
+                        st.markdown(analysis)
+                except Exception as e:
+                    status_container.error(f"❌ Fehler bei der Analyse: {str(e)}")
+        else:
+            try:
+                # Temporäre Datei erstellen
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    video_path = tmp_file.name
+                
+                status_container.info("⏳ Transkription wird erstellt...")
+                
+                # Whisper Transkription
+                model = whisper.load_model("base")
+                result = model.transcribe(video_path)
+                transcript = result["text"]
+                
+                # Speichern der Transkription
+                st.session_state.processed_files.add(file_hash)
+                st.session_state.transcripts[file_hash] = transcript
+                
+                # Cleanup
+                os.unlink(video_path)
+                
+                # GPT Analyse
+                status_container.info("⏳ Analyse wird durchgeführt...")
+                analysis = analyze_transcript(transcript)
+                
+                status_container.success("✅ Analyse abgeschlossen!")
+                
+                # Ergebnisse anzeigen
+                with st.expander("📝 Transkription", expanded=False):
+                    st.text_area("", transcript, height=200)
+                
+                with st.expander("🔍 Analyse", expanded=True):
+                    st.markdown(analysis)
+                
+                # Speichern in der Datenbank
+                save_analysis_to_db(
+                    st.session_state.current_project,
+                    transcript,
+                    analysis
+                )
+                
+                # Erfolgsanimation
+                st.balloons()
+            
+            except Exception as e:
+                status_container.error(f"❌ Fehler bei der Verarbeitung: {str(e)}")
+                if 'video_path' in locals():
+                    os.unlink(video_path)
+    
     # Hier kommt Ihr bestehender Code für Video-Upload und Analyse
 
 if __name__ == "__main__":
