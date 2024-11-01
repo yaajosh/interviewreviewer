@@ -68,3 +68,4 @@ wheel==0.43.0
 ffmpeg-python
 soundfile
 pymongo[srv]
+certifi

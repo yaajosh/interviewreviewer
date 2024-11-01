@@ -11,7 +11,15 @@ import hashlib
 @st.cache_resource
 def init_db():
     try:
-        client = MongoClient(st.secrets["MONGODB_URI"])
+        # Verbindungsoptionen für SSL
+        client = MongoClient(
+            st.secrets["MONGODB_URI"],
+            tls=True,
+            tlsAllowInvalidCertificates=True,
+            serverSelectionTimeoutMS=5000
+        )
+        # Test the connection
+        client.admin.command('ping')
         return client.interview_analyzer
     except Exception as e:
         st.error(f"Datenbankverbindung fehlgeschlagen: {str(e)}")
