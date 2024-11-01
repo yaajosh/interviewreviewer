@@ -1,33 +1,34 @@
 import streamlit as st
-import hashlib
+import whisper
+import openai
+import tempfile
+import os
 from datetime import datetime
 from pymongo import MongoClient
-from bson import ObjectId
+import hashlib
 
 # MongoDB Verbindung
 @st.cache_resource
 def init_db():
     try:
         client = MongoClient(st.secrets["MONGODB_URI"])
-        # Test the connection
-        client.admin.command('ping')
-        db = client.interview_analyzer
-        st.success("Mit Datenbank verbunden!")
-        return db
+        return client.interview_analyzer
     except Exception as e:
         st.error(f"Datenbankverbindung fehlgeschlagen: {str(e)}")
         return None
 
-# Datenbank-Operationen
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# Benutzer-Management
 def create_user(username, password, email):
-    """Erstellt einen neuen Benutzer"""
     db = init_db()
+    if not db:
+        return False, "Datenbankverbindung fehlgeschlagen"
     
-    # Prüfe ob Benutzer existiert
     if db.users.find_one({"username": username}):
         return False, "Benutzername bereits vergeben"
     
-    # Erstelle neuen Benutzer
     user = {
         'username': username,
         'password': hash_password(password),
@@ -44,24 +45,21 @@ def create_user(username, password, email):
     return True, "Registrierung erfolgreich! Bitte loggen Sie sich ein."
 
 def check_credentials(username, password):
-    """Überprüft die Anmeldedaten"""
     db = init_db()
-    user = db.users.find_one({"username": username})
+    if not db:
+        return False
     
+    user = db.users.find_one({"username": username})
     if user and user['password'] == hash_password(password):
         return True
     return False
 
-def get_user_projects(username):
-    """Holt alle Projekte eines Benutzers"""
-    db = init_db()
-    return list(db.projects.find({"owner": username}))
-
+# Projekt-Management
 def create_project(name, description, owner):
-    """Erstellt ein neues Projekt"""
     db = init_db()
+    if not db:
+        return False, "Datenbankverbindung fehlgeschlagen"
     
-    # Prüfe ob Projekt existiert
     if db.projects.find_one({"name": name, "owner": owner}):
         return False, "Ein Projekt mit diesem Namen existiert bereits!"
     
@@ -76,26 +74,17 @@ def create_project(name, description, owner):
     db.projects.insert_one(project)
     return True, "Projekt erfolgreich erstellt!"
 
-def save_analysis(project_id, transcript, analysis):
-    """Speichert eine neue Analyse"""
+def get_user_projects(username):
     db = init_db()
-    
-    analysis_data = {
-        'transcript': transcript,
-        'analysis': analysis,
-        'created': datetime.now()
-    }
-    
-    db.projects.update_one(
-        {"_id": ObjectId(project_id)},
-        {"$push": {"analyses": analysis_data}}
-    )
+    if not db:
+        return []
+    return list(db.projects.find({"owner": username}))
 
-# Rest des Codes bleibt größtenteils gleich, nur die Datenspeicherung wird angepasst
+# UI
 def login():
     st.sidebar.title("🔐 Login")
     
-    if not st.session_state.authenticated:
+    if not st.session_state.get('authenticated', False):
         tab1, tab2 = st.sidebar.tabs(["🔑 Login", "📝 Registrierung"])
         
         with tab1:
@@ -131,14 +120,64 @@ def login():
                             st.success(message)
                         else:
                             st.error(message)
+    
+    else:
+        st.sidebar.success(f"✅ Eingeloggt als {st.session_state.current_user}")
+        
+        # Projekt Management
+        st.sidebar.markdown("---")
+        st.sidebar.title("📊 Projekt Manager")
+        
+        # Neues Projekt erstellen
+        with st.sidebar.expander("➕ Neues Projekt"):
+            with st.form("new_project_form"):
+                new_project = st.text_input("Projektname")
+                project_description = st.text_area("Projektbeschreibung", height=100)
+                create_project_btn = st.form_submit_button("Projekt erstellen")
+                
+                if create_project_btn and new_project:
+                    success, message = create_project(new_project, project_description, st.session_state.current_user)
+                    if success:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+        
+        # Projekte anzeigen
+        projects = get_user_projects(st.session_state.current_user)
+        if projects:
+            selected_project = st.sidebar.selectbox(
+                "🎯 Projekt auswählen",
+                options=[p['name'] for p in projects]
+            )
+            if selected_project:
+                st.session_state.current_project = selected_project
+        
+        # Ausloggen
+        if st.sidebar.button("Ausloggen"):
+            st.session_state.authenticated = False
+            st.session_state.current_user = None
+            st.session_state.current_project = None
+            st.rerun()
 
-def test_db_connection():
-    db = init_db()
-    if db:
-        # Erstelle Collections wenn sie nicht existieren
-        if "users" not in db.list_collection_names():
-            db.create_collection("users")
-        if "projects" not in db.list_collection_names():
-            db.create_collection("projects")
-        return True
-    return False
+def main():
+    st.title("User Interview Analyse Tool")
+    
+    # Login und Projekt Management
+    login()
+    
+    if not st.session_state.get('authenticated', False):
+        st.warning("Bitte melden Sie sich an, um das Tool zu nutzen.")
+        return
+    
+    if not st.session_state.get('current_project'):
+        st.info("Bitte wählen Sie ein Projekt aus oder erstellen Sie ein neues.")
+        return
+    
+    # Hauptbereich für Video-Upload und Analyse
+    st.write(f"🎯 Aktives Projekt: **{st.session_state.current_project}**")
+    
+    # Hier kommt Ihr bestehender Code für Video-Upload und Analyse
+
+if __name__ == "__main__":
+    main()
