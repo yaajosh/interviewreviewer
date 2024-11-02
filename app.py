@@ -320,10 +320,7 @@ def main():
                 )
                 
                 if uploaded_file:
-                    # Progress Container
                     progress_container = st.empty()
-                    
-                    # Datei-Hash für Cache
                     file_hash = hash(uploaded_file.getvalue())
                     
                     if file_hash in st.session_state.get('processed_files', set()):
@@ -344,11 +341,12 @@ def main():
                                 
                                 if save_analysis_to_db(st.session_state.current_project, transcript, analysis):
                                     st.success("✅ Analyse wurde gespeichert!")
+                                    st.session_state.show_upload = False
                                     st.balloons()
+                                    st.rerun()
                     
                     else:
                         try:
-                            # Temporäre Datei erstellen
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
                                 tmp_file.write(uploaded_file.getvalue())
                                 video_path = tmp_file.name
@@ -357,7 +355,6 @@ def main():
                             transcript = transcribe_video(video_path)
                             
                             if transcript:
-                                # Cache-Verwaltung
                                 if 'processed_files' not in st.session_state:
                                     st.session_state.processed_files = set()
                                 if 'transcripts' not in st.session_state:
@@ -380,15 +377,19 @@ def main():
                                     
                                     if save_analysis_to_db(st.session_state.current_project, transcript, analysis):
                                         st.success("✅ Analyse wurde gespeichert!")
+                                        st.session_state.show_upload = False
                                         st.balloons()
+                                        st.rerun()
                         
-                        # Cleanup
-                        os.unlink(video_path)
+                            # Cleanup
+                            if os.path.exists(video_path):
+                                os.unlink(video_path)
                         
-                    except Exception as e:
-                        progress_container.error(f"❌ Fehler: {str(e)}")
-                        if 'video_path' in locals():
-                            os.unlink(video_path)
+                        except Exception as e:
+                            progress_container.error(f"❌ Fehler: {str(e)}")
+                            if 'video_path' in locals() and os.path.exists(video_path):
+                                os.unlink(video_path)
+                
                 if st.button("❌ Abbrechen"):
                     st.session_state.show_upload = False
                     st.rerun()
