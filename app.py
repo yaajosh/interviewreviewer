@@ -346,7 +346,9 @@ def show_project_overview():
 
     # Upload Modal
     if st.session_state.get('show_upload_modal', False):
-        with st.modal("🎥 Neue Analyse", key="upload_modal"):
+        modal = st.container()
+        with modal:
+            st.markdown("### 🎥 Neue Analyse")
             uploaded_file = st.file_uploader(
                 "Video hochladen (MP4, MOV, AVI)", 
                 type=['mp4', 'mov', 'avi']
