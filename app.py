@@ -3,7 +3,7 @@ import tempfile
 import os
 from datetime import datetime
 from supabase import create_client
-import openai
+from openai import OpenAI
 import warnings
 import random
 import time
@@ -184,32 +184,57 @@ def transcribe_video(video_path):
         model = load_whisper()
         if model is None:
             return None
-        result = model.transcribe(video_path)
+            
+        # Konvertiere Video zu Audio wenn nötig
+        import subprocess
+        audio_path = video_path.replace('.mp4', '.wav')
+        command = [
+            'ffmpeg', '-i', video_path,
+            '-vn',  # Keine Video-Ausgabe
+            '-acodec', 'pcm_s16le',  # Audio-Codec
+            '-ar', '16000',  # Sample Rate
+            '-ac', '1',  # Mono
+            '-y',  # Überschreibe existierende Datei
+            audio_path
+        ]
+        
+        subprocess.run(command, capture_output=True)
+        
+        # Transkribiere Audio
+        result = model.transcribe(audio_path)
+        
+        # Cleanup
+        os.unlink(audio_path)
+        
         return result["text"]
     except Exception as e:
         st.error(f"Fehler bei der Transkription: {str(e)}")
         return None
 
+# OpenAI Client initialisieren
+@st.cache_resource
+def init_openai():
+    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 def analyze_transcript(transcript):
     try:
-        prompt = f"""
-        Analysiere das folgende User Interview und erstelle eine strukturierte Zusammenfassung:
-        
-        {transcript}
-        
-        Bitte strukturiere die Analyse wie folgt:
-        1. Haupterkenntnisse (3-5 Punkte)
-        2. Schmerzpunkte des Nutzers
-        3. Vorgeschlagene Lösungen/Wünsche
-        4. Interessante Zitate
-        5. Empfehlungen für nächste Schritte
-        """
-        
-        response = openai.ChatCompletion.create(
+        client = init_openai()
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "Du bist ein erfahrener UX Researcher, der User Interviews analysiert."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": f"""
+                Analysiere das folgende User Interview und erstelle eine strukturierte Zusammenfassung:
+                
+                {transcript}
+                
+                Bitte strukturiere die Analyse wie folgt:
+                1. Haupterkenntnisse (3-5 Punkte)
+                2. Schmerzpunkte des Nutzers
+                3. Vorgeschlagene Lösungen/Wünsche
+                4. Interessante Zitate
+                5. Empfehlungen für nächste Schritte
+                """}
             ]
         )
         return response.choices[0].message.content
