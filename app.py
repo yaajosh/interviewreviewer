@@ -5,6 +5,8 @@ from datetime import datetime
 from supabase import create_client
 import openai
 import warnings
+import random
+import time
 warnings.filterwarnings("ignore")
 
 # Basis-Konfiguration
@@ -248,6 +250,52 @@ def get_project_analyses(project_name):
         st.error(f"Fehler beim Laden der Analysen: {str(e)}")
         return []
 
+# Datenbank-Updates
+def init_db():
+    supabase = init_supabase()
+    # Analyses als separate Tabelle
+    supabase.table('analyses').create({
+        'id': 'uuid default uuid_generate_v4() primary key',
+        'project_id': 'uuid references projects(id)',
+        'status': 'text default "pending"',
+        'transcript': 'text',
+        'analysis': 'text',
+        'created_at': 'timestamp with time zone default now()',
+        'updated_at': 'timestamp with time zone default now()'
+    })
+
+def create_analysis(project_id, file_hash):
+    try:
+        supabase = init_supabase()
+        analysis_data = {
+            'project_id': project_id,
+            'status': 'pending',
+            'file_hash': file_hash
+        }
+        response = supabase.table('analyses').insert(analysis_data).execute()
+        return response.data[0]['id']
+    except Exception as e:
+        st.error(f"Fehler beim Erstellen der Analyse: {str(e)}")
+        return None
+
+def update_analysis(analysis_id, data):
+    try:
+        supabase = init_supabase()
+        supabase.table('analyses').update(data).eq('id', analysis_id).execute()
+        return True
+    except Exception as e:
+        st.error(f"Fehler beim Update der Analyse: {str(e)}")
+        return False
+
+def get_analysis(analysis_id):
+    try:
+        supabase = init_supabase()
+        response = supabase.table('analyses').select('*').eq('id', analysis_id).execute()
+        return response.data[0] if response.data else None
+    except Exception as e:
+        st.error(f"Fehler beim Laden der Analyse: {str(e)}")
+        return None
+
 def main():
     st.title("Interview Analyzer")
     
@@ -255,148 +303,158 @@ def main():
     
     if st.session_state.get('authenticated', False):
         if st.session_state.get('current_project'):
-            # Projekt Header
-            st.markdown(f"""
-                ### 🎯 Projekt: {st.session_state.current_project}
-                ---
-            """)
+            if st.session_state.get('view_analysis'):
+                show_analysis_detail()
+            else:
+                show_project_overview()
+
+def show_project_overview():
+    st.markdown(f"""
+        ### 🎯 Projekt: {st.session_state.current_project}
+        ---
+    """)
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col2:
+        if st.button("➕ Neue Analyse", type="primary", use_container_width=True):
+            st.session_state.show_upload_modal = True
+    
+    with col1:
+        analyses = get_project_analyses(st.session_state.current_project)
+        if analyses:
+            st.markdown("### 📊 Analysen")
             
-            # Zwei Spalten: Analysen Tabelle und Neue Analyse Button
-            col1, col2 = st.columns([3, 1])
+            # Verbesserte Tabelle mit Status
+            df = pd.DataFrame([{
+                "Nr.": idx + 1,
+                "Datum": datetime.fromisoformat(a['created_at']).strftime('%d.%m.%Y %H:%M'),
+                "Status": "✅ Fertig" if a['status'] == 'completed' else "⏳ In Bearbeitung",
+                "Details": "Öffnen"
+            } for idx, a in enumerate(analyses)])
             
-            with col2:
-                # Neue Analyse Button
-                if st.button("➕ Neue Analyse", type="primary", use_container_width=True):
-                    st.session_state.show_upload = True
+            st.dataframe(
+                df,
+                column_config={
+                    "Nr.": st.column_config.NumberColumn(width=50),
+                    "Datum": st.column_config.TextColumn(width=150),
+                    "Status": st.column_config.TextColumn(width=120),
+                    "Details": st.column_config.ButtonColumn(width=100)
+                },
+                hide_index=True
+            )
+
+    # Upload Modal
+    if st.session_state.get('show_upload_modal', False):
+        with st.modal("🎥 Neue Analyse", key="upload_modal"):
+            uploaded_file = st.file_uploader(
+                "Video hochladen (MP4, MOV, AVI)", 
+                type=['mp4', 'mov', 'avi']
+            )
             
+            col1, col2 = st.columns([1,1])
             with col1:
-                # Analysen Tabelle
-                analyses = get_project_analyses(st.session_state.current_project)
-                if analyses:
-                    st.markdown("### 📊 Bisherige Analysen")
-                    
-                    # Erstelle DataFrame für bessere Darstellung
-                    import pandas as pd
-                    analyses_data = []
-                    for idx, analysis in enumerate(analyses, 1):
-                        date = datetime.fromisoformat(analysis['created_at']).strftime('%d.%m.%Y %H:%M')
-                        analyses_data.append({
-                            "Nr.": idx,
-                            "Datum": date,
-                            "Details": "Anzeigen"
-                        })
-                    
-                    df = pd.DataFrame(analyses_data)
-                    st.dataframe(
-                        df,
-                        column_config={
-                            "Nr.": st.column_config.NumberColumn(width=50),
-                            "Datum": st.column_config.TextColumn(width=150),
-                            "Details": st.column_config.ButtonColumn(width=100)
-                        },
-                        hide_index=True
-                    )
-                    
-                    # Wenn auf Details geklickt wird
-                    if "Details" in st.session_state.get("clicked_button", ""):
-                        idx = int(st.session_state.clicked_button.split("-")[1]) - 1
-                        analysis = analyses[idx]
-                        with st.expander("📝 Analyse Details", expanded=True):
-                            st.markdown("**Transkription:**")
-                            st.text_area("", analysis['transcript'], height=150)
-                            st.markdown("**Analyse:**")
-                            st.markdown(analysis['analysis'])
-                else:
-                    st.info("Noch keine Analysen vorhanden")
-            
-            # Video Upload und Analyse Bereich
-            if st.session_state.get('show_upload', False):
-                st.markdown("---")
-                st.markdown("### 🎥 Neue Analyse")
-                
-                uploaded_file = st.file_uploader(
-                    "Video hochladen (MP4, MOV, AVI)", 
-                    type=['mp4', 'mov', 'avi']
-                )
-                
-                if uploaded_file:
-                    progress_container = st.empty()
-                    file_hash = hash(uploaded_file.getvalue())
-                    
-                    if file_hash in st.session_state.get('processed_files', set()):
-                        progress_container.info("🔄 Diese Datei wurde bereits verarbeitet")
-                        transcript = st.session_state.transcripts.get(file_hash, "")
+                start_disabled = not uploaded_file
+                if st.button("🚀 Analyse starten", disabled=start_disabled, type="primary"):
+                    if uploaded_file:
+                        file_hash = hash(uploaded_file.getvalue())
+                        analysis_id = create_analysis(st.session_state.current_project_id, file_hash)
                         
-                        if st.button("🔄 Neu analysieren"):
-                            progress_container.info("⏳ Analyse wird durchgeführt...")
-                            analysis = analyze_transcript(transcript)
-                            if analysis:
-                                progress_container.success("✅ Analyse abgeschlossen!")
-                                
-                                with st.expander("📝 Transkription", expanded=False):
-                                    st.text_area("", transcript, height=200)
-                                
-                                with st.expander("🔍 Analyse", expanded=True):
-                                    st.markdown(analysis)
-                                
-                                if save_analysis_to_db(st.session_state.current_project, transcript, analysis):
-                                    st.success("✅ Analyse wurde gespeichert!")
-                                    st.session_state.show_upload = False
-                                    st.balloons()
-                                    st.rerun()
-                    
-                    else:
-                        try:
+                        if analysis_id:
+                            # Speichere File für Background Processing
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
                                 tmp_file.write(uploaded_file.getvalue())
-                                video_path = tmp_file.name
+                                st.session_state.processing_file = tmp_file.name
+                                st.session_state.processing_analysis_id = analysis_id
                             
-                            progress_container.info("⏳ Transkription wird erstellt...")
-                            transcript = transcribe_video(video_path)
-                            
-                            if transcript:
-                                if 'processed_files' not in st.session_state:
-                                    st.session_state.processed_files = set()
-                                if 'transcripts' not in st.session_state:
-                                    st.session_state.transcripts = {}
-                                    
-                                st.session_state.processed_files.add(file_hash)
-                                st.session_state.transcripts[file_hash] = transcript
-                                
-                                progress_container.info("⏳ Analyse wird durchgeführt...")
-                                analysis = analyze_transcript(transcript)
-                                
-                                if analysis:
-                                    progress_container.success("✅ Analyse abgeschlossen!")
-                                    
-                                    with st.expander("📝 Transkription", expanded=False):
-                                        st.text_area("", transcript, height=200)
-                                    
-                                    with st.expander("🔍 Analyse", expanded=True):
-                                        st.markdown(analysis)
-                                    
-                                    if save_analysis_to_db(st.session_state.current_project, transcript, analysis):
-                                        st.success("✅ Analyse wurde gespeichert!")
-                                        st.session_state.show_upload = False
-                                        st.balloons()
-                                        st.rerun()
-                        
-                            # Cleanup
-                            if os.path.exists(video_path):
-                                os.unlink(video_path)
-                        
-                        except Exception as e:
-                            progress_container.error(f"❌ Fehler: {str(e)}")
-                            if 'video_path' in locals() and os.path.exists(video_path):
-                                os.unlink(video_path)
-                
+                            st.session_state.show_upload_modal = False
+                            st.rerun()
+            
+            with col2:
                 if st.button("❌ Abbrechen"):
-                    st.session_state.show_upload = False
+                    st.session_state.show_upload_modal = False
                     st.rerun()
-        else:
-            st.info("Bitte wählen Sie ein Projekt aus oder erstellen Sie ein neues.")
+
+def show_analysis_detail():
+    analysis = get_analysis(st.session_state.current_analysis_id)
+    
+    st.markdown(f"""
+        ### 🔍 Analyse Details
+        _{datetime.fromisoformat(analysis['created_at']).strftime('%d.%m.%Y %H:%M')}_
+        ---
+    """)
+    
+    if analysis['status'] == 'pending':
+        st.markdown("""
+            <div style='text-align: center; padding: 2rem;'>
+                <div class="stSpinner">
+                    <div class="st-spinner-border" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+                <h3>Analyse wird durchgeführt...</h3>
+                <p>Dies kann einige Minuten dauern. Bitte haben Sie Geduld.</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Rotating status messages
+        status_messages = [
+            "Transkribiere Video...",
+            "Analysiere Gespräch...",
+            "Erstelle Zusammenfassung...",
+            "Identifiziere Kernpunkte..."
+        ]
+        
+        placeholder = st.empty()
+        time.sleep(2)  # Prevent too frequent updates
+        placeholder.info(random.choice(status_messages))
+        
+        st.rerun()  # Check status again
+    
     else:
-        st.info("Bitte melden Sie sich an.")
+        col1, col2 = st.columns([1,4])
+        with col1:
+            if st.button("← Zurück"):
+                st.session_state.view_analysis = False
+                st.rerun()
+        
+        with st.expander("📝 Transkription", expanded=False):
+            st.text_area("", analysis['transcript'], height=200)
+        
+        with st.expander("🔍 Analyse", expanded=True):
+            st.markdown(analysis['analysis'])
+
+# Background Processing
+if 'processing_file' in st.session_state:
+    video_path = st.session_state.processing_file
+    analysis_id = st.session_state.processing_analysis_id
+    
+    try:
+        # Transcription
+        transcript = transcribe_video(video_path)
+        if transcript:
+            update_analysis(analysis_id, {
+                'transcript': transcript,
+                'status': 'transcribed'
+            })
+        
+        # Analysis
+        analysis = analyze_transcript(transcript)
+        if analysis:
+            update_analysis(analysis_id, {
+                'analysis': analysis,
+                'status': 'completed'
+            })
+        
+        # Cleanup
+        os.unlink(video_path)
+        del st.session_state.processing_file
+        del st.session_state.processing_analysis_id
+    
+    except Exception as e:
+        st.error(f"Fehler bei der Verarbeitung: {str(e)}")
+        if os.path.exists(video_path):
+            os.unlink(video_path)
 
 if __name__ == "__main__":
     main()
