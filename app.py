@@ -156,8 +156,9 @@ def login():
             projects = get_user_projects(st.session_state.user.id)
             if projects:
                 for project in projects:
-                    if st.button(f"📁 {project['name']}", key=project['name']):
+                    if st.button(f"📁 {project['name']}", key=project['name'], use_container_width=True):
                         st.session_state.current_project = project['name']
+                        st.session_state.current_project_id = project['id']  # Speichere auch die ID
                         st.rerun()
             else:
                 st.info("Noch keine Projekte vorhanden")
@@ -296,6 +297,17 @@ def get_analysis(analysis_id):
         st.error(f"Fehler beim Laden der Analyse: {str(e)}")
         return None
 
+def get_project_id(project_name):
+    try:
+        supabase = init_supabase()
+        response = supabase.table('projects').select('id').eq('name', project_name).execute()
+        if response.data and len(response.data) > 0:
+            return response.data[0]['id']
+        return None
+    except Exception as e:
+        st.error(f"Fehler beim Laden der Projekt-ID: {str(e)}")
+        return None
+
 def main():
     st.title("Interview Analyzer")
     
@@ -314,6 +326,12 @@ def show_project_overview():
         ---
     """)
     
+    # Get project ID when loading overview
+    if 'current_project_id' not in st.session_state:
+        project_id = get_project_id(st.session_state.current_project)
+        if project_id:
+            st.session_state.current_project_id = project_id
+    
     col1, col2 = st.columns([3, 1])
     
     with col2:
@@ -325,7 +343,6 @@ def show_project_overview():
         if analyses:
             st.markdown("### 📊 Analysen")
             
-            # Verbesserte Tabelle mit Status
             df = pd.DataFrame([{
                 "Nr.": idx + 1,
                 "Datum": datetime.fromisoformat(a['created_at']).strftime('%d.%m.%Y %H:%M'),
@@ -358,12 +375,11 @@ def show_project_overview():
             with col1:
                 start_disabled = not uploaded_file
                 if st.button("🚀 Analyse starten", disabled=start_disabled, type="primary"):
-                    if uploaded_file:
+                    if uploaded_file and st.session_state.get('current_project_id'):
                         file_hash = hash(uploaded_file.getvalue())
                         analysis_id = create_analysis(st.session_state.current_project_id, file_hash)
                         
                         if analysis_id:
-                            # Speichere File für Background Processing
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
                                 tmp_file.write(uploaded_file.getvalue())
                                 st.session_state.processing_file = tmp_file.name
